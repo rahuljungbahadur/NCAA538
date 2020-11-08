@@ -1,0 +1,154 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(tidymodels)
+library(magrittr)
+library(data.table)
+
+```
+
+```{r}
+tournament <- fread("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-10-06/tournament.csv")
+
+```
+
+```{r}
+tournament %>% head()
+tournament %>% colnames()
+```
+
+```{r}
+tournament %>%
+  group_by(seed) %>%
+  summarise(exp_wins = mean(tourney_w, na.rm = T)) %>%
+  ggplot(aes(x = seed, exp_wins)) + 
+  geom_point(size = 3)
+```
+These are just the means. We can also plot the raw data.
+
+```{r}
+library(splines)
+
+tournament %>%
+  ggplot(aes(seed, tourney_w)) + 
+  geom_bin2d(binwidth = c(1,1), alpha = 0.8) + 
+  scale_fill_gradient(low = "grey85", high = "midnightblue") + 
+  theme_classic() + 
+  geom_smooth(se = F, method = "lm", formula = y ~ ns(x, df = 4), col = "black")
+```
+
+```{r}
+tourney_split <- tournament %>%
+  filter(!is.na(seed)) %>%
+  initial_split(strata = seed)
+
+tourney_train <- training(tourney_split)
+tourney_test <- testing(tourney_split)
+```
+
+```{r}
+set.seed(1234)
+
+tourney_folds <- bootstraps(tourney_train)
+```
+
+```{r recipe}
+tourney_recipe <- 
+  recipe(tourney_w ~ seed, data = tourney_train) %>%
+  step_ns(seed, deg_free = tune("seed_splines"))
+
+tourney_recipe
+```
+
+```{r model}
+tourney_model <- 
+  linear_reg(mode = "regression") %>%
+  set_engine("lm")
+
+tourney_model
+```
+```{r workflow}
+tourney_wf <- 
+  workflow() %>%
+  add_recipe(tourney_recipe) %>%
+  add_model(tourney_model)
+
+tourney_wf
+```
+
+```{r model fitting}
+doParallel::registerDoParallel()
+
+save_preds <- control_grid(save_pred = T)
+
+spline_grid <- tibble(seed_splines = c(1:3, 5, 7, 10, 15))
+
+spline_results <-
+  tune_grid(
+    tourney_wf,
+    resamples = tourney_folds,
+    grid = spline_grid,
+    control = save_preds
+  )
+
+spline_results
+```
+## Evaluate Model
+```{r}
+collect_metrics(spline_results)
+
+autoplot(spline_results)
+
+## Has the knee at around df = 3
+
+select_best(spline_results, metric = "rmse")
+
+## Select by pct loss
+select_by_pct_loss(spline_results, metric = "rmse", limit = 1, spline_grid$seed_splines)
+
+#select_by_one_std_err(spline_results, metric = "rmse", spline_grid$seed_splines)
+```
+```{r}
+tournament %>%
+  ggplot(aes(seed, tourney_w)) + 
+  geom_bin2d(binwidth = c(1,1), alpha = 0.8) + 
+  scale_fill_gradient(low = "grey85", high = "midnightblue") + 
+  theme_classic() + 
+  geom_smooth(se = F, method = "lm", col = "black", size = 1.5,
+              formula = y ~ ns(x, df = 3)) + 
+  geom_smooth(se = F, method = "lm", col = "black", lty = 2,
+              formula = y ~ ns(x, df = 10))
+  
+```
+
+```{r}
+final_wf <- finalize_workflow(tourney_wf, parameters = tibble(seed_splines = 3))
+
+tourney_fit <- fit(final_wf, tourney_train)
+```
+
+```{r save model}
+saveRDS(tourney_fit, file = "bestFitModel.rds")
+```
+
+```{r predictions}
+
+predictedDf <- tourney_test %>%
+  bind_cols(predict(tourney_fit, tourney_test)) %>%
+  metrics(tourney_w, .pred)
+```
+
+```{r}
+predict(tourney_fit, new_data = tibble(seed = 1:16))
+```
+Some of the predictions are negative (when seed > 15). However, you can use this to predict the wins.
+
+
+
+
+
+
