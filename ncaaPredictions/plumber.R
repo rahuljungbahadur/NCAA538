@@ -8,6 +8,7 @@
 #
 
 library(plumber)
+library(tidymodels)
 
 #* @apiTitle Plumber Example API
 
@@ -26,7 +27,7 @@ function(msg = "") {
 function(a, b) {
     as.numeric(a) + as.numeric(b)
 }
-fittedModel <- readRDS("E:\\TidyTuesdays\\NCAAWomensBasketball\\bestFitModel.rds")
+fittedModel <- readRDS("E:\\TidyTuesdays\\NCAAWomensBasketball\\NCAA538\\bestFitModel.rds")
 
 #* retiurns the prediction based on the seed
 #* @param newSeed THe seed on which the prediction is made
